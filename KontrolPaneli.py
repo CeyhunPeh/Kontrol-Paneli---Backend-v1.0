@@ -58,23 +58,29 @@ async def log_polling_loop():
                     headers = {"Authorization": f"Bearer {RENDER_API_KEY}"}
                     response = await client.get(url, headers=headers)
                     
+                    # --- YENİ EKLENEN KALP ATIŞI ---
+                    print(f"[{s_id}] Render API'ye soruldu. Cevap Kodu: {response.status_code}")
+                    
                     if response.status_code == 200:
-                        logs = response.json() # Render list of logs döner
+                        logs = response.json() 
+                        print(f"[{s_id}] {len(logs)} adet log satırı çekildi.") # YENİ EKLENDİ
+                        
                         for log_entry in logs:
                             msg = log_entry.get("text", "")
                             
-                            # Sınıflandırma
                             level = "SUCCESS"
                             if any(x in msg for x in ["500", "503", "error", "Fatal"]): level = "CRITICAL"
                             elif any(x in msg for x in ["404", "warn", "timeout"]): level = "WARNING"
                             
-                            # 1. Kaydet
                             save_to_neon(s_id, level, msg)
                             
-                            # 2. WebSocket ile Flutter'a gönder
                             payload = {"type": "log", "service": s_id, "level": level, "message": msg}
                             for ws in active_connections:
                                 await ws.send_text(json.dumps(payload))
+                                
+                    else:
+                        # Eğer 200 değilse hatayı yazdır
+                        print(f"[{s_id}] API REDDETTİ: {response.text}") 
                                 
                 except Exception as e:
                     print(f"Polling Hatası ({s_id}): {e}")
