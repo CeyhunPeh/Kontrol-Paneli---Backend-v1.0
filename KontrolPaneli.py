@@ -43,6 +43,10 @@ async def handle_render_log(request: Request):
         
     return {"status": "ok"}
 
+@app.get("/")
+async def health_check():
+    return {"status": "alive", "message": "Sistem ayakta, Ceyhun!"}
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
