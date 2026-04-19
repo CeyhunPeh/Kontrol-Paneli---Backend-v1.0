@@ -13,7 +13,7 @@ SERVICE_IDS = os.environ.get('SERVICE_IDS', "").split(",")
 
 # Yeni eklenen Neon API konfigürasyonları
 NEON_API_KEY = os.environ.get('NEON_API_KEY')
-NEON_PROJECT_ID = os.environ.get('NEON_PROJECT_ID')
+NEON_PROJECT_IDS = os.environ.get('NEON_PROJECT_ID', "").split(",")
 
 active_connections = []
 
@@ -85,34 +85,39 @@ async def neon_metrics_loop():
     """Neon API'den belirli aralıklarla (örn: 5 dk) sistem metriklerini çeker."""
     async with httpx.AsyncClient() as client:
         while True:
-            # API anahtarları tanımlıysa çalıştır
-            if NEON_API_KEY and NEON_PROJECT_ID:
-                try:
-                    url = f"https://console.neon.tech/api/v2/projects/{NEON_PROJECT_ID}"
-                    headers = {
-                        "Authorization": f"Bearer {NEON_API_KEY}",
-                        "Accept": "application/json"
-                    }
-                    response = await client.get(url, headers=headers)
+            # API anahtarı tanımlıysa çalıştır
+            if NEON_API_KEY:
+                for p_id in NEON_PROJECT_IDS:
+                    p_id = p_id.strip() # Boşluk kalmışsa temizle
+                    if not p_id: continue
                     
-                    if response.status_code == 200:
-                        data = response.json()
-                        project_data = data.get("project", {})
-                        
-                        # Flutter'a metrik verisi olarak gönder
-                        payload = {
-                            "type": "metric",
-                            "source": "neon",
-                            "data": project_data
+                    try:
+                        url = f"https://console.neon.tech/api/v2/projects/{p_id}"
+                        headers = {
+                            "Authorization": f"Bearer {NEON_API_KEY}",
+                            "Accept": "application/json"
                         }
+                        response = await client.get(url, headers=headers)
                         
-                        for ws in active_connections:
-                            await ws.send_text(json.dumps(payload))
+                        if response.status_code == 200:
+                            data = response.json()
+                            project_data = data.get("project", {})
                             
-                except Exception as e:
-                    print(f"Neon Metrik Hatası: {e}")
+                            # Flutter'a hangi projenin verisi olduğunu da ('project_id') ekleyerek gönderiyoruz
+                            payload = {
+                                "type": "metric",
+                                "source": "neon",
+                                "project_id": p_id,
+                                "data": project_data
+                            }
+                            
+                            for ws in active_connections:
+                                await ws.send_text(json.dumps(payload))
+                                
+                    except Exception as e:
+                        print(f"Neon Metrik Hatası ({p_id}): {e}")
             
-            # Loglar kadar anlık olmasına gerek yok, 300 saniye (5 dk) bekleme süresi idealdir.
+            # Tüm projeleri sorguladıktan sonra 5 dk bekle
             await asyncio.sleep(300)
 
 @app.get("/")
