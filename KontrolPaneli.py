@@ -11,17 +11,22 @@ DATABASE_URL = os.environ.get('DATABASE_URL')
 RENDER_API_KEY = os.environ.get('RENDER_API_KEY')
 SERVICE_IDS = os.environ.get('SERVICE_IDS', "").split(",")
 
-# WebSocket bağlantılarını tutar
+# Yeni eklenen Neon API konfigürasyonları
+NEON_API_KEY = os.environ.get('NEON_API_KEY')
+NEON_PROJECT_ID = os.environ.get('NEON_PROJECT_ID')
+
 active_connections = []
 
 # Arka plan görevi için lifespan (FastAPI modern yöntemi)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Uygulama başlarken döngüyü başlat
-    task = asyncio.create_task(log_polling_loop())
+    # Uygulama başlarken döngüleri başlat
+    task_logs = asyncio.create_task(log_polling_loop())
+    task_metrics = asyncio.create_task(neon_metrics_loop())
     yield
-    # Uygulama kapanırken görevi iptal et
-    task.cancel()
+    # Uygulama kapanırken görevleri iptal et
+    task_logs.cancel()
+    task_metrics.cancel()
 
 app = FastAPI(lifespan=lifespan)
 
@@ -75,6 +80,40 @@ async def log_polling_loop():
                     print(f"Polling Hatası ({s_id}): {e}")
             
             await asyncio.sleep(60) # 1 dakika bekle
+
+async def neon_metrics_loop():
+    """Neon API'den belirli aralıklarla (örn: 5 dk) sistem metriklerini çeker."""
+    async with httpx.AsyncClient() as client:
+        while True:
+            # API anahtarları tanımlıysa çalıştır
+            if NEON_API_KEY and NEON_PROJECT_ID:
+                try:
+                    url = f"https://console.neon.tech/api/v2/projects/{NEON_PROJECT_ID}"
+                    headers = {
+                        "Authorization": f"Bearer {NEON_API_KEY}",
+                        "Accept": "application/json"
+                    }
+                    response = await client.get(url, headers=headers)
+                    
+                    if response.status_code == 200:
+                        data = response.json()
+                        project_data = data.get("project", {})
+                        
+                        # Flutter'a metrik verisi olarak gönder
+                        payload = {
+                            "type": "metric",
+                            "source": "neon",
+                            "data": project_data
+                        }
+                        
+                        for ws in active_connections:
+                            await ws.send_text(json.dumps(payload))
+                            
+                except Exception as e:
+                    print(f"Neon Metrik Hatası: {e}")
+            
+            # Loglar kadar anlık olmasına gerek yok, 300 saniye (5 dk) bekleme süresi idealdir.
+            await asyncio.sleep(300)
 
 @app.get("/")
 async def health():
